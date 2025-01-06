@@ -1,0 +1,10 @@
+slack-sdk==3.33.0
+slack-bolt==1.20.1
+python-dotenv==1.0.1
+requests==2.32.3
+Flask==3.0.3
+openai==1.46.0
+pydantic==2.9.2
+yfinance==0.2.43
+instructor==1.4.2
+ollama==0.3.3
