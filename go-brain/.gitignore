@@ -1,0 +1,84 @@
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+bin/
+dist/
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool, specifically when used with LiteIDE
+*.out
+
+# Dependency directories (remove the comment below to include it)
+vendor/
+
+# Go workspace file
+go.work
+
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# IDE specific files
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Build output
+build/
+*.log
+*.log.*
+
+# Debug files
+debug
+*.debug
+
+# Coverage files
+coverage.txt
+coverage.html
+*.cover
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.temp
+
+# Local development files
+local/
+dev/
+
+# ngrok files
+ngrok.yml
+*.ngrok
+
+# Slack specific
+slack_config.json
+*.slack
+
+# Log files
+logs/
+*.log
+
+# Binary files
+*.bin
+
+# Cache directories
+.cache/
+__pycache__/
+
+# Backup files
+*.bak
+*.backup
+*~
+
+# System files
+.DS_Store
+Thumbs.db 
