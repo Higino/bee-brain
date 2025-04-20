@@ -6,14 +6,13 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
 
 	"github.com/sirupsen/logrus"
 )
 
 const (
-	ollamaEndpoint = "http://0.0.0.0:11434/api/generate"
-	defaultModel   = "llama2"
+	ollamaEndpoint = "http://ollama:11434/api/chat"
+	defaultModel   = "llama3"
 )
 
 type Message struct {
@@ -23,71 +22,73 @@ type Message struct {
 
 type Client struct {
 	logger *logrus.Logger
-	name   string
+	Name   string
 }
 
 func NewClient(logger *logrus.Logger, name string) *Client {
 	return &Client{
 		logger: logger,
-		name:   name,
+		Name:   name,
 	}
 }
 
 func (c *Client) Chat(messages []Message) (string, error) {
-	// Add system message with bot identity
-	systemMessage := Message{
-		Role:    "system",
-		Content: fmt.Sprintf("You are %s, a helpful AI assistant. Answer questions concisely and accurately.", c.name),
+	// Log the messages being sent
+	c.logger.Debug("Sending messages to LLM:")
+	for i, msg := range messages {
+		c.logger.Debugf("Message %d [%s]: %s", i+1, msg.Role, msg.Content)
 	}
 
-	// Prepare the prompt from messages
-	var prompt strings.Builder
-	prompt.WriteString(fmt.Sprintf("%s: %s\n", systemMessage.Role, systemMessage.Content))
-	for _, msg := range messages {
-		prompt.WriteString(fmt.Sprintf("%s: %s\n", msg.Role, msg.Content))
-	}
-
-	// Prepare request
 	reqBody := map[string]interface{}{
-		"model":  defaultModel,
-		"prompt": prompt.String(),
-		"stream": false,
+		"model":    defaultModel,
+		"messages": messages,
+		"stream":   false, // Disable streaming for now
 	}
 
-	jsonData, err := json.Marshal(reqBody)
+	// Marshal the request
+	jsonBody, err := json.Marshal(reqBody)
 	if err != nil {
-		return "", fmt.Errorf("error marshaling request: %v", err)
+		return "", fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	c.logger.Infof("Sending request to LLM (model: %s, prompt length: %d)", defaultModel, len(prompt.String()))
+	c.logger.Infof("Sending request to LLM (model: %s, messages: %d)", defaultModel, len(messages))
 
-	resp, err := http.Post(ollamaEndpoint, "application/json", bytes.NewBuffer(jsonData))
+	// Make the request
+	resp, err := http.Post(ollamaEndpoint, "application/json", bytes.NewBuffer(jsonBody))
 	if err != nil {
-		return "", fmt.Errorf("error making request: %v", err)
+		return "", fmt.Errorf("failed to make request: %w", err)
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("unexpected status code: %d", resp.StatusCode)
-	}
-
+	// Read the response
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", fmt.Errorf("error reading response: %v", err)
+		return "", fmt.Errorf("failed to read response: %w", err)
 	}
 
+	// Log the raw response for debugging
+	c.logger.Debugf("Raw LLM response: %s", string(body))
+
+	// Parse the response
 	var response struct {
 		Model     string `json:"model"`
 		CreatedAt string `json:"created_at"`
-		Response  string `json:"response"`
-		Done      bool   `json:"done"`
+		Message   struct {
+			Role    string `json:"role"`
+			Content string `json:"content"`
+		} `json:"message"`
+		Done bool `json:"done"`
 	}
 	if err := json.Unmarshal(body, &response); err != nil {
-		c.logger.Errorf("Failed to decode LLM response: %v", err)
-		return "", fmt.Errorf("error decoding response: %v", err)
+		c.logger.Errorf("Failed to decode LLM response: %v, body: %s", err, string(body))
+		return "", fmt.Errorf("failed to decode response: %w", err)
 	}
 
-	c.logger.Infof("Received response from LLM (model: %s, length: %d)", response.Model, len(response.Response))
+	if !response.Done {
+		return "", fmt.Errorf("response not complete")
+	}
 
-	return response.Response, nil
+	c.logger.Infof("Received response from LLM (model: %s, length: %d)", response.Model, len(response.Message.Content))
+	c.logger.Debugf("LLM response content: %s", response.Message.Content)
+	return response.Message.Content, nil
 }

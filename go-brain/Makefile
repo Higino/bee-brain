@@ -88,12 +88,18 @@ configure-ngrok:
 	@echo "$(GREEN)Ngrok configured successfully!$(RESET)"
 
 # Start ngrok tunnel
-ngrok: configure-ngrok
+tunnel: configure-ngrok
+	@echo "$(BLUE)Checking for existing ngrok processes...$(RESET)"
+	@if pgrep ngrok > /dev/null; then \
+		echo "$(YELLOW)Found existing ngrok process, stopping it...$(RESET)"; \
+		pkill ngrok; \
+		sleep 2; \
+	fi
 	@echo "$(BLUE)Starting ngrok tunnel...$(RESET)"
 	@ngrok http 8080
 
 # Run application and start ngrok tunnel
-tunnel: build configure-ngrok
+app-and-tunnel: build configure-ngrok
 	@echo "$(MAGENTA)Starting application and ngrok tunnel...$(RESET)"
 	@echo "$(YELLOW)Press Ctrl+C to stop both processes$(RESET)"
 	@echo ""

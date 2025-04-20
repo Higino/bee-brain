@@ -26,10 +26,27 @@ func main() {
 		FullTimestamp: true,
 	})
 
-	// Get Slack token
-	botToken := os.Getenv("SLACK_BOT_OAUTH_TOKEN")
+	// Set log level from environment variable
+	logLevel := os.Getenv("LOG_LEVEL")
+	if logLevel == "" {
+		logLevel = "info" // Default to info if not set
+	}
+	level, err := logrus.ParseLevel(logLevel)
+	if err != nil {
+		logger.Warnf("Invalid LOG_LEVEL '%s', defaulting to 'info'", logLevel)
+		level = logrus.InfoLevel
+	}
+	logger.SetLevel(level)
+
+	// Get Slack tokens
+	botToken := os.Getenv("SLACK_BOT_TOKEN")
 	if botToken == "" {
-		logger.Fatal("SLACK_BOT_OAUTH_TOKEN environment variable is not set")
+		logger.Fatal("SLACK_BOT_TOKEN environment variable is not set")
+	}
+
+	verificationToken := os.Getenv("SLACK_VERIFICATION_TOKEN")
+	if verificationToken == "" {
+		logger.Fatal("SLACK_VERIFICATION_TOKEN environment variable is not set")
 	}
 
 	// Initialize Slack client
@@ -44,12 +61,13 @@ func main() {
 	// Initialize LLM client with bot name
 	llmClient := llm.NewClient(logger, "BeeBrain")
 
-	// Initialize Slack event handler
-	eventHandler := slackhandler.NewEventHandler(
+	// Create Slack event handler
+	slackHandler := slackhandler.NewBeeBrainSlackEventHandler(
 		slackClient,
 		llmClient,
 		logger,
 		os.Getenv("SLACK_SIGNING_SECRET"),
+		verificationToken,
 	)
 
 	// Initialize Echo server
@@ -61,8 +79,8 @@ func main() {
 	e.Use(middleware.CORS())
 
 	// Add routes
-	e.POST("/", eventHandler.HandleEvents)       // Handle Slack events at root
-	e.POST("/events", eventHandler.HandleEvents) // Also handle events at /events
+	e.POST("/", slackHandler.HandleSlackEvents)       // Handle Slack events at root
+	e.POST("/events", slackHandler.HandleSlackEvents) // Also handle events at /events
 
 	// Start server
 	port := os.Getenv("PORT")

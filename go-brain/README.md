@@ -1,51 +1,73 @@
-# BeeBrain Slack Bot (Go Version)
+# BeeBrain Slack Bot
 
-A Slack bot built with Go that provides intelligent responses using LLM integration.
+A Go-based Slack bot that integrates with Ollama for intelligent conversation handling. This bot can process messages in threads and maintain context-aware conversations.
+
+## Features
+
+- 🤖 Intelligent conversation handling using Ollama
+- 🧵 Thread-aware message processing
+- 🔒 Secure request verification
+- 📝 Clean and maintainable logging
+- 🐳 Docker support for easy deployment
 
 ## Prerequisites
 
 - Go 1.21 or later
-- Slack App with appropriate permissions
-- Environment variables (see `.env.example`)
+- Docker and Docker Compose
+- Slack workspace with admin access
+- Ollama server (can be run via Docker)
 
-## Setup
+## Environment Variables
 
-1. Clone the repository:
+Create a `.env` file in the root directory with the following variables:
+
 ```bash
-git clone <repository-url>
-cd go-brain
+SLACK_BOT_TOKEN=your-bot-token
+SLACK_SIGNING_SECRET=your-signing-secret
+OLLAMA_API_URL=http://localhost:11434/api/generate
 ```
 
-2. Install dependencies:
+## Local Development
+
+### Using Go
+
+1. Install dependencies:
 ```bash
-make deps
+go mod download
 ```
 
-3. Copy `.env.example` to `.env` and fill in your Slack credentials:
-```bash
-cp .env.example .env
-```
-
-4. Build the application:
+2. Build the application:
 ```bash
 make build
 ```
 
-## Running the Application
-
-To run the application:
+3. Run the application:
 ```bash
 make run
 ```
 
-The bot will start on port 3000.
+### Using Docker
 
-## Development
+1. Build and start the services:
+```bash
+docker-compose up --build
+```
 
-- Build: `make build`
-- Run: `make run`
-- Test: `make test`
-- Clean: `make clean`
+This will start both the BeeBrain bot and Ollama services.
+
+## Docker Services
+
+The application consists of two Docker services:
+
+1. **Ollama Service**
+   - Port: 11434
+   - Persistent volume for model data
+   - Accessible at `http://localhost:11434`
+
+2. **BeeBrain Service**
+   - Port: 8080
+   - Environment variables from `.env`
+   - Accessible at `http://localhost:8080`
 
 ## Project Structure
 
@@ -55,24 +77,47 @@ go-brain/
 │   └── beebrain/
 │       └── main.go
 ├── internal/
-│   ├── slack/
-│   │   └── handler.go
-│   └── llm/
-│       └── client.go
-├── pkg/
-│   └── utils/
+│   ├── llm/
+│   │   └── client.go
+│   └── slack/
+│       └── handler.go
+├── Dockerfile.beebrain
+├── Dockerfile.ollama
+├── docker-compose.yml
 ├── go.mod
 ├── go.sum
-├── Makefile
-└── README.md
+└── .env.example
 ```
 
-## Environment Variables
+## Make Commands
 
-- `SLACK_BOT_OAUTH_TOKEN`: Your Slack bot OAuth token
-- `SLACK_SIGNING_SECRET`: Your Slack app signing secret
-- `SLACK_BOT_USER`: Your Slack bot user ID
+- `make build`: Build the application
+- `make run`: Run the application
+- `make test`: Run tests
+- `make clean`: Clean build artifacts
+- `make deps`: Download dependencies
+
+## Slack Integration
+
+1. Create a new Slack app in your workspace
+2. Add the following bot token scopes:
+   - `app_mentions:read`
+   - `channels:history`
+   - `chat:write`
+   - `groups:history`
+   - `im:history`
+   - `mpim:history`
+3. Install the app to your workspace
+4. Copy the bot token and signing secret to your `.env` file
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Commit your changes
+4. Push to the branch
+5. Create a Pull Request
 
 ## License
 
-MIT 
+This project is licensed under the MIT License - see the LICENSE file for details. 

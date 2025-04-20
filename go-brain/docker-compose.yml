@@ -1,0 +1,26 @@
+version: '3.8'
+
+services:
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+
+  beebrain:
+    build:
+      context: .
+      dockerfile: Dockerfile.beebrain
+    ports:
+      - "8080:8080"
+    environment:
+      - SLACK_BOT_TOKEN=${SLACK_BOT_TOKEN}
+      - SLACK_SIGNING_SECRET=${SLACK_SIGNING_SECRET}
+      - SLACK_VERIFICATION_TOKEN=${SLACK_VERIFICATION_TOKEN}
+      - SLACK_BOT_USER=${SLACK_BOT_USER}
+    depends_on:
+      - ollama
+
+volumes:
+  ollama_data: 
