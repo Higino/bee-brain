@@ -24,7 +24,8 @@ Create a `.env` file in the root directory with the following variables:
 ```bash
 SLACK_BOT_TOKEN=your-bot-token
 SLACK_SIGNING_SECRET=your-signing-secret
-OLLAMA_API_URL=http://localhost:11434/api/generate
+SLACK_VERIFICATION_TOKEN=your-verification-token
+OLLAMA_API_URL=http://localhost:11434/api/chat
 ```
 
 ## Local Development
