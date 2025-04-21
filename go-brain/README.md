@@ -74,6 +74,7 @@ The application consists of two Docker services:
 
 ```
 go-brain/
+├── bin/                    # Compiled binaries
 ├── cmd/
 │   └── beebrain/
 │       └── main.go
@@ -82,11 +83,13 @@ go-brain/
 │   │   └── client.go
 │   └── slack/
 │       └── handler.go
-├── Dockerfile.beebrain
-├── Dockerfile.ollama
+├── Dockerfile             # Main Dockerfile
+├── Dockerfile.beebrain    # BeeBrain-specific Dockerfile
+├── Dockerfile.ollama      # Ollama-specific Dockerfile
 ├── docker-compose.yml
 ├── go.mod
 ├── go.sum
+├── Makefile
 └── .env.example
 ```
 
@@ -97,6 +100,11 @@ go-brain/
 - `make test`: Run tests
 - `make clean`: Clean build artifacts
 - `make deps`: Download dependencies
+- `make docker-build`: Build Docker images
+- `make docker-run`: Run the application in Docker
+- `make docker-clean`: Clean Docker resources
+- `make lint`: Run linter checks
+- `make fmt`: Format Go code
 
 ## Slack Integration
 
