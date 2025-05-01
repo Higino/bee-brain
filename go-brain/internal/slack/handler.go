@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"beebrain/internal/llm"
+	"beebrain/internal/vectordb"
 
 	"github.com/labstack/echo/v4"
 	"github.com/sirupsen/logrus"
@@ -20,6 +21,7 @@ import (
 type BeeBrainSlackEventHandler struct {
 	client            *slack.Client
 	llmClient         *llm.Client
+	vectorDB          *vectordb.Client
 	logger            *logrus.Logger
 	signingSecret     string
 	verificationToken string
@@ -28,10 +30,11 @@ type BeeBrainSlackEventHandler struct {
 	llmMode         string
 }
 
-func NewBeeBrainSlackEventHandler(client *slack.Client, llmClient *llm.Client, logger *logrus.Logger, signingSecret, verificationToken, llmMode string) *BeeBrainSlackEventHandler {
+func NewBeeBrainSlackEventHandler(client *slack.Client, llmClient *llm.Client, vectorDB *vectordb.Client, logger *logrus.Logger, signingSecret, verificationToken, llmMode string) *BeeBrainSlackEventHandler {
 	return &BeeBrainSlackEventHandler{
 		client:            client,
 		llmClient:         llmClient,
+		vectorDB:          vectorDB,
 		logger:            logger,
 		signingSecret:     signingSecret,
 		verificationToken: verificationToken,
@@ -236,6 +239,11 @@ func (h *BeeBrainSlackEventHandler) handleAppMention(c echo.Context, ev *slackev
 }
 
 func (h *BeeBrainSlackEventHandler) handleIncomingMessage(c echo.Context, ev *slackevents.MessageEvent) error {
+	// Skip if this is a duplicate event
+	if h.isDuplicateEvent(ev.EventTimeStamp) {
+		return c.NoContent(http.StatusOK)
+	}
+
 	// Get user info from Slack API
 	userInfo, err := h.client.GetUserInfo(ev.User)
 	if err != nil {
@@ -248,6 +256,28 @@ func (h *BeeBrainSlackEventHandler) handleIncomingMessage(c echo.Context, ev *sl
 
 	h.logger.Infof("IncommingMessage - User: %s (%s), Channel: %s, Thread: %s, Text: %s",
 		userInfo.Name, userInfo.ID, ev.Channel, ev.ThreadTimeStamp, ev.Text)
+
+	// Get embedding for the message
+	embedding, err := h.llmClient.GetEmbedding(ev.Text)
+	if err != nil {
+		h.logger.Errorf("Failed to get embedding for message: %v", err)
+		return c.NoContent(http.StatusOK)
+	}
+
+	// Store message in VectorDB with a proper UUID
+	msg := vectordb.Message{
+		ID:        "", // Let VectorDB client generate a proper UUID
+		Text:      ev.Text,
+		UserID:    ev.User,
+		ChannelID: ev.Channel,
+		Timestamp: ev.TimeStamp,
+		ThreadID:  ev.ThreadTimeStamp, // The thread's root message timestamp (unique identifier for the thread)
+		Embedding: embedding,
+	}
+
+	if err := h.vectorDB.StoreMessage(msg); err != nil {
+		h.logger.Errorf("Failed to store message in VectorDB: %v", err)
+	}
 
 	return c.NoContent(http.StatusOK)
 }

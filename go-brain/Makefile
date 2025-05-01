@@ -8,7 +8,7 @@ WHITE := $(shell tput setaf 7)
 RED := $(shell tput setaf 1)
 RESET := $(shell tput sgr0)
 
-.PHONY: build run test clean install lint ngrok help check deps fmt docker-build docker-run docker-clean verify-env verify-go app-and-tunnel configure-ngrok docker
+.PHONY: build run test clean install lint ngrok help check deps fmt docker-build docker-run docker-clean verify-env verify-go app-and-tunnel configure-ngrok docker update-deps
 
 # Load environment variables
 include .env
@@ -36,7 +36,14 @@ help:
 	@echo "$(GREEN)verify-env$(RESET)     - Verify environment variables"
 	@echo "$(GREEN)verify-go$(RESET)      - Verify Go version compatibility"
 	@echo "$(GREEN)deps$(RESET)           - Download dependencies"
+	@echo "$(GREEN)update-deps$(RESET)    - Update dependencies and go.sum"
 	@echo "$(GREEN)help$(RESET)           - Show this help message"
+
+# Update dependencies and go.sum
+update-deps:
+	@echo "$(BLUE)Updating dependencies and go.sum...$(RESET)"
+	@go mod tidy
+	@echo "$(GREEN)Dependencies updated successfully!$(RESET)"
 
 # Verify Go version
 verify-go:
@@ -62,10 +69,7 @@ verify: verify-go verify-env
 	@echo "$(GREEN)All checks passed!$(RESET)"
 
 # Download dependencies
-deps: verify-go
-	@echo "$(BLUE)Downloading dependencies...$(RESET)"
-	@go mod download
-	@go mod tidy
+deps: verify-go update-deps
 	@echo "$(GREEN)Dependencies downloaded successfully!$(RESET)"
 
 # Build the application
@@ -147,7 +151,11 @@ app-and-tunnel: build configure-ngrok
 	ngrok http 8080 & \
 	./bin/beebrain
 
-docker-run:
+docker-build: update-deps
+	@echo "$(BLUE)Building Docker images...$(RESET)"
+	@docker-compose build
+
+docker-run: docker-build
 	@echo "$(BLUE)Starting Docker services...$(RESET)"
 	@docker-compose up -d --build
 

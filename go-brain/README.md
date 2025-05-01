@@ -1,6 +1,6 @@
 # BeeBrain Slack Bot
 
-A Go-based Slack bot that integrates with Ollama for intelligent conversation handling. This bot can process messages in threads and maintain context-aware conversations.
+A Go-based Slack bot that integrates with Ollama for intelligent conversation handling and Qdrant for vector storage. This bot can process messages in threads and maintain context-aware conversations.
 
 ## Features
 
@@ -10,6 +10,7 @@ A Go-based Slack bot that integrates with Ollama for intelligent conversation ha
 - 📝 Clean and maintainable logging
 - 🐳 Docker support for easy deployment
 - 🔄 Alternative `/generate` command for direct text generation
+- 📊 Vector storage for message history using Qdrant
 
 ## Prerequisites
 
@@ -17,6 +18,7 @@ A Go-based Slack bot that integrates with Ollama for intelligent conversation ha
 - Docker and Docker Compose
 - Slack workspace with admin access
 - Ollama server (can be run via Docker)
+- Qdrant server (can be run via Docker)
 - ngrok (for local development with Slack)
 
 ## Environment Variables
@@ -28,8 +30,8 @@ SLACK_BOT_TOKEN=your-bot-token
 SLACK_SIGNING_SECRET=your-signing-secret
 SLACK_VERIFICATION_TOKEN=your-verification-token
 SLACK_BOT_USER=your-bot-user-id
-OLLAMA_API_URL=http://localhost:11434/api/chat
-NGROK_AUTH_TOKEN=your-ngrok-auth-token  # Required for local development
+QDRANT_HOST=qdrant
+QDRANT_PORT=6334
 ```
 
 ## Local Development
@@ -63,18 +65,23 @@ make tunnel
 docker-compose up --build
 ```
 
-This will start both the BeeBrain bot and Ollama services.
+This will start the BeeBrain bot, Ollama, and Qdrant services.
 
 ## Docker Services
 
-The application consists of two Docker services:
+The application consists of three Docker services:
 
 1. **Ollama Service**
    - Port: 11434
    - Persistent volume for model data (`ollama_data`)
    - Accessible at `http://localhost:11434`
 
-2. **BeeBrain Service**
+2. **Qdrant Service**
+   - Ports: 6333 (HTTP), 6334 (gRPC)
+   - Persistent volume for vector data (`qdrant_data`)
+   - Accessible at `http://localhost:6333`
+
+3. **BeeBrain Service**
    - Port: 8080
    - Environment variables from `.env`
    - Accessible at `http://localhost:8080`
@@ -85,16 +92,20 @@ The application consists of two Docker services:
 go-brain/
 ├── bin/                    # Compiled binaries
 ├── cmd/
-│   └── beebrain/
+│   ├── beebrain/
+│   │   └── main.go
+│   └── check-message/
 │       └── main.go
 ├── internal/
 │   ├── llm/
 │   │   └── client.go
-│   └── slack/
-│       └── handler.go
+│   ├── slack/
+│   │   └── handler.go
+│   └── vectordb/
+│       └── client.go
 ├── Dockerfile             # Main Dockerfile
 ├── Dockerfile.beebrain    # BeeBrain-specific Dockerfile
-├── Dockerfile.ollama      # Ollama-specific Dockerfile
+├── Dockerfile.check-message # Check-message tool Dockerfile
 ├── docker-compose.yml
 ├── go.mod
 ├── go.sum

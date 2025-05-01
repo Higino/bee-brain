@@ -1,11 +1,13 @@
 package main
 
 import (
+	"context"
 	"log"
 	"os"
 
 	"beebrain/internal/llm"
 	slackhandler "beebrain/internal/slack"
+	"beebrain/internal/vectordb"
 
 	"github.com/joho/godotenv"
 	"github.com/labstack/echo/v4"
@@ -61,10 +63,23 @@ func main() {
 	// Initialize LLM client with bot name
 	llmClient := llm.NewClient(logger, "BeeBrain")
 
+	// Initialize VectorDB client
+	vectorDB, err := vectordb.NewClient(logger)
+	if err != nil {
+		logger.Fatalf("Failed to create VectorDB client: %v", err)
+	}
+
+	// Initialize VectorDB collection
+	if err := vectorDB.InitializeCollection(context.Background()); err != nil {
+		logger.Fatalf("Failed to initialize VectorDB collection: %v", err)
+	}
+	logger.Info("Successfully initialized VectorDB")
+
 	// Create Slack event handler
 	slackHandler := slackhandler.NewBeeBrainSlackEventHandler(
 		slackClient,
 		llmClient,
+		vectorDB,
 		logger,
 		os.Getenv("SLACK_SIGNING_SECRET"),
 		verificationToken,

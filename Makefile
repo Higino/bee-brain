@@ -1,61 +1,39 @@
-.PHONY: all build run test clean lint dev-install ngrok tunnel
+.PHONY: all install test lint run clean build deps
 
 # Default target
-all: tunnel
+all: install
 
-# Delegate all targets to the Go project's Makefile
-%:
-	@cd go-brain && $(MAKE) $@
+# Install dependencies
+install: deps
 
-VENV = .venv
-PYTHON = $(VENV)/bin/python
-PIP = $(VENV)/bin/pip
-
-# Create virtual environment
-venv:
-	python3 -m venv $(VENV)
-	$(PIP) install --upgrade pip
-
-# Install production dependencies
-install: venv
-	$(PIP) install -r requirements.txt
-
-# Install development dependencies
-dev-install: venv
-	$(PIP) install -r requirements-dev.txt
-
-# Run tests with coverage
+# Run tests
 test:
-	$(PYTHON) -m pytest
+	go test ./...
 
-# Run linters
+# Run linter
 lint:
-	$(PYTHON) -m flake8 .
-	$(PYTHON) -m mypy .
-	$(PYTHON) -m isort --check-only .
-	$(PYTHON) -m black --check .
-
-# Format code
-format:
-	$(PYTHON) -m isort .
-	$(PYTHON) -m black .
-
-# Clean build artifacts and virtual environment
-clean:
-	rm -rf build/
-	rm -rf dist/
-	rm -rf *.egg-info/
-	rm -rf .pytest_cache/
-	rm -rf .coverage
-	rm -rf $(VENV)
-	find . -type d -name "__pycache__" -exec rm -rf {} +
-	find . -type f -name "*.pyc" -delete
+	golangci-lint run
 
 # Run the application
 run:
-	$(PYTHON) beebrain_app.py
+	go run cmd/beebrain/main.go
 
-# Activate virtual environment (for shell use)
-activate:
-	@echo "To activate the virtual environment, run:"
-	@echo "source $(VENV)/bin/activate" 
+# Clean build artifacts
+clean:
+	rm -rf bin/
+	go clean
+
+# Build the application
+build:
+	mkdir -p bin
+	go build -o bin/beebrain cmd/beebrain/main.go
+	go build -o bin/check-message cmd/check-message/main.go
+
+# Install dependencies
+deps:
+	go mod download
+	go mod tidy
+
+# Start ngrok tunnel for local development
+tunnel:
+	ngrok http 8080 

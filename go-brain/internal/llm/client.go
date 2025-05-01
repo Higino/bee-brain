@@ -11,9 +11,10 @@ import (
 )
 
 const (
-	ollamaEndpoint         = "http://ollama:11434/api/chat"
-	ollamaGenerateEndpoint = "http://ollama:11434/api/generate"
-	defaultModel           = "llama3"
+	ollamaEndpoint          = "http://ollama:11434/api/chat"
+	ollamaGenerateEndpoint  = "http://ollama:11434/api/generate"
+	ollamaEmbeddingEndpoint = "http://ollama:11434/api/embeddings"
+	defaultModel            = "llama3"
 )
 
 type User struct {
@@ -147,4 +148,44 @@ func (c *Client) Generate(prompt string) (string, error) {
 
 	c.logger.Infof("Received generation response from LLM (model: %s, length: %d)", response.Model, len(response.Response))
 	return response.Response, nil
+}
+
+func (c *Client) GetEmbedding(text string) ([]float32, error) {
+	reqBody := map[string]interface{}{
+		"model":  defaultModel,
+		"prompt": text,
+	}
+
+	// Marshal the request
+	jsonBody, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	c.logger.Debugf("Getting embedding for text: %s", text)
+
+	// Make the request
+	resp, err := http.Post(ollamaEmbeddingEndpoint, "application/json", bytes.NewBuffer(jsonBody))
+	if err != nil {
+		return nil, fmt.Errorf("failed to make request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// Read the response
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	// Parse the response
+	var response struct {
+		Embedding []float32 `json:"embedding"`
+	}
+	if err := json.Unmarshal(body, &response); err != nil {
+		c.logger.Errorf("Failed to decode embedding response: %v", err)
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	c.logger.Debugf("Received embedding of size: %d", len(response.Embedding))
+	return response.Embedding, nil
 }
