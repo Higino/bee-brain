@@ -11,8 +11,9 @@ import (
 )
 
 const (
-	ollamaEndpoint = "http://ollama:11434/api/chat"
-	defaultModel   = "llama3"
+	ollamaEndpoint         = "http://ollama:11434/api/chat"
+	ollamaGenerateEndpoint = "http://ollama:11434/api/generate"
+	defaultModel           = "llama3"
 )
 
 type Message struct {
@@ -91,4 +92,58 @@ func (c *Client) Chat(messages []Message) (string, error) {
 	c.logger.Infof("Received response from LLM (model: %s, length: %d)", response.Model, len(response.Message.Content))
 	c.logger.Debugf("LLM response content: %s", response.Message.Content)
 	return response.Message.Content, nil
+}
+
+func (c *Client) Generate(prompt string) (string, error) {
+	c.logger.Debugf("Generating text for prompt: %s", prompt)
+
+	reqBody := map[string]interface{}{
+		"model":  defaultModel,
+		"prompt": prompt,
+		"stream": false,
+	}
+
+	// Marshal the request
+	jsonBody, err := json.Marshal(reqBody)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	c.logger.Infof("Sending generation request to LLM (model: %s)", defaultModel)
+
+	// Make the request
+	resp, err := http.Post(ollamaGenerateEndpoint, "application/json", bytes.NewBuffer(jsonBody))
+	if err != nil {
+		return "", fmt.Errorf("failed to make request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// Read the response
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("failed to read response: %w", err)
+	}
+
+	// Log the raw response for debugging
+	c.logger.Debugf("Raw LLM generation response: %s", string(body))
+
+	// Parse the response
+	var response struct {
+		Model     string `json:"model"`
+		CreatedAt string `json:"created_at"`
+		Response  string `json:"response"`
+		Done      bool   `json:"done"`
+	}
+	if err := json.Unmarshal(body, &response); err != nil {
+		c.logger.Errorf("Failed to decode LLM generation response: %v, body: %s", err, string(body))
+		return "", fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	if !response.Done {
+		return "", fmt.Errorf("response not complete")
+	}
+
+	c.logger.Infof("Received generation response from LLM (model: %s, length: %d)", response.Model, len(response.Response))
+	c.logger.Debugf("LLM generation response: %s", response.Response)
+	return response.Response, nil
 }

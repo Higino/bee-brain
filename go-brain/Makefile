@@ -8,7 +8,7 @@ WHITE := $(shell tput setaf 7)
 RED := $(shell tput setaf 1)
 RESET := $(shell tput sgr0)
 
-.PHONY: build run test clean install lint ngrok tunnel help check deps
+.PHONY: build run test clean install lint ngrok help check deps fmt docker-build docker-run docker-clean verify-env verify-go app-and-tunnel configure-ngrok docker
 
 # Load environment variables
 include .env
@@ -17,25 +17,56 @@ export
 # Help target
 help:
 	@echo "$(CYAN)Available targets:$(RESET)"
-	@echo "$(GREEN)build$(RESET)      - Build the application"
-	@echo "$(GREEN)run$(RESET)        - Run the application"
-	@echo "$(GREEN)test$(RESET)       - Run tests"
-	@echo "$(GREEN)clean$(RESET)      - Clean build artifacts"
-	@echo "$(GREEN)install$(RESET)    - Install development dependencies"
-	@echo "$(GREEN)lint$(RESET)       - Run linter"
-	@echo "$(GREEN)check$(RESET)      - Run all checks (lint and tests)"
-	@echo "$(GREEN)ngrok$(RESET)      - Start ngrok tunnel"
-	@echo "$(GREEN)tunnel$(RESET)     - Run application and start ngrok tunnel"
+	@echo "$(GREEN)build$(RESET)          - Build the application"
+	@echo "$(GREEN)run$(RESET)            - Run the application"
+	@echo "$(GREEN)test$(RESET)           - Run tests"
+	@echo "$(GREEN)clean$(RESET)          - Clean build artifacts"
+	@echo "$(GREEN)install$(RESET)        - Install development dependencies"
+	@echo "$(GREEN)lint$(RESET)           - Run linter"
+	@echo "$(GREEN)check$(RESET)          - Run all checks (lint and tests)"
+	@echo "$(GREEN)fmt$(RESET)            - Format Go code"
+	@echo "$(GREEN)ngrok$(RESET)          - Start ngrok tunnel"
+	@echo "$(GREEN)tunnel$(RESET)         - Run application and start ngrok tunnel"
+	@echo "$(GREEN)app-and-tunnel$(RESET) - Run app and ngrok tunnel together"
+	@echo "$(GREEN)configure-ngrok$(RESET) - Configure ngrok with auth token"
+	@echo "$(GREEN)docker$(RESET)         - Build and run Docker containers"
+	@echo "$(GREEN)docker-build$(RESET)   - Build Docker images"
+	@echo "$(GREEN)docker-run$(RESET)     - Run application in Docker"
+	@echo "$(GREEN)docker-clean$(RESET)   - Clean Docker resources"
+	@echo "$(GREEN)verify-env$(RESET)     - Verify environment variables"
+	@echo "$(GREEN)verify-go$(RESET)      - Verify Go version compatibility"
+	@echo "$(GREEN)deps$(RESET)           - Download dependencies"
+	@echo "$(GREEN)help$(RESET)           - Show this help message"
+
+# Verify Go version
+verify-go:
+	@echo "$(BLUE)Verifying Go version...$(RESET)"
+	@if [ "$$(go version | cut -d' ' -f3 | cut -d'.' -f2)" -lt "21" ]; then \
+		echo "$(RED)Error: Go version 1.21 or later is required$(RESET)"; \
+		exit 1; \
+	fi
+	@echo "$(GREEN)Go version check passed!$(RESET)"
+
+# Verify environment variables
+verify-env:
+	@echo "$(BLUE)Verifying environment variables...$(RESET)"
+	@for var in SLACK_BOT_TOKEN SLACK_SIGNING_SECRET SLACK_VERIFICATION_TOKEN SLACK_BOT_USER OLLAMA_API_URL; do \
+		if [ -z "$$(printenv $$var)" ]; then \
+			echo "$(RED)Error: $$var is not set in .env file$(RESET)"; \
+			exit 1; \
+		fi \
+	done
+	@echo "$(GREEN)Environment variables check passed!$(RESET)"
 
 # Download dependencies
-deps:
+deps: verify-go
 	@echo "$(BLUE)Downloading dependencies...$(RESET)"
 	@go mod download
 	@go mod tidy
 	@echo "$(GREEN)Dependencies downloaded successfully!$(RESET)"
 
 # Build the application
-build: deps
+build: deps verify-env
 	@echo "$(BLUE)Building application...$(RESET)"
 	@go build -o bin/beebrain cmd/beebrain/main.go
 	@echo "$(GREEN)Build complete!$(RESET)"
@@ -67,6 +98,12 @@ lint: deps
 	@echo "$(BLUE)Running linter...$(RESET)"
 	@golangci-lint run
 
+# Format Go code
+fmt:
+	@echo "$(BLUE)Formatting Go code...$(RESET)"
+	@go fmt ./...
+	@echo "$(GREEN)Formatting complete!$(RESET)"
+
 # Check target - runs linting and tests
 check: deps
 	@echo "$(BLUE)Running checks...$(RESET)"
@@ -88,7 +125,7 @@ configure-ngrok:
 	@echo "$(GREEN)Ngrok configured successfully!$(RESET)"
 
 # Start ngrok tunnel
-tunnel: configure-ngrok
+ngrok: configure-ngrok
 	@echo "$(BLUE)Checking for existing ngrok processes...$(RESET)"
 	@if pgrep ngrok > /dev/null; then \
 		echo "$(YELLOW)Found existing ngrok process, stopping it...$(RESET)"; \
@@ -105,4 +142,13 @@ app-and-tunnel: build configure-ngrok
 	@echo ""
 	@trap 'kill -9 $$(lsof -t -i:8080) 2>/dev/null; exit' INT; \
 	ngrok http 8080 & \
-	./bin/beebrain 
+	./bin/beebrain
+
+docker-run:
+	@echo "$(BLUE)Starting Docker services...$(RESET)"
+	@docker-compose up --build
+
+docker-clean:
+	@echo "$(YELLOW)Cleaning Docker resources...$(RESET)"
+	@docker-compose down -v
+	@echo "$(GREEN)Docker cleanup complete!$(RESET)" 

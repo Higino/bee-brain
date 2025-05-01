@@ -9,6 +9,7 @@ A Go-based Slack bot that integrates with Ollama for intelligent conversation ha
 - 🔒 Secure request verification
 - 📝 Clean and maintainable logging
 - 🐳 Docker support for easy deployment
+- 🔄 Alternative `/generate` command for direct text generation
 
 ## Prerequisites
 
@@ -16,6 +17,7 @@ A Go-based Slack bot that integrates with Ollama for intelligent conversation ha
 - Docker and Docker Compose
 - Slack workspace with admin access
 - Ollama server (can be run via Docker)
+- ngrok (for local development with Slack)
 
 ## Environment Variables
 
@@ -25,7 +27,9 @@ Create a `.env` file in the root directory with the following variables:
 SLACK_BOT_TOKEN=your-bot-token
 SLACK_SIGNING_SECRET=your-signing-secret
 SLACK_VERIFICATION_TOKEN=your-verification-token
+SLACK_BOT_USER=your-bot-user-id
 OLLAMA_API_URL=http://localhost:11434/api/chat
+NGROK_AUTH_TOKEN=your-ngrok-auth-token  # Required for local development
 ```
 
 ## Local Development
@@ -34,7 +38,7 @@ OLLAMA_API_URL=http://localhost:11434/api/chat
 
 1. Install dependencies:
 ```bash
-go mod download
+make deps
 ```
 
 2. Build the application:
@@ -45,6 +49,11 @@ make build
 3. Run the application:
 ```bash
 make run
+```
+
+4. For local development with Slack, start the ngrok tunnel:
+```bash
+make tunnel
 ```
 
 ### Using Docker
@@ -62,7 +71,7 @@ The application consists of two Docker services:
 
 1. **Ollama Service**
    - Port: 11434
-   - Persistent volume for model data
+   - Persistent volume for model data (`ollama_data`)
    - Accessible at `http://localhost:11434`
 
 2. **BeeBrain Service**
@@ -100,11 +109,12 @@ go-brain/
 - `make test`: Run tests
 - `make clean`: Clean build artifacts
 - `make deps`: Download dependencies
-- `make docker-build`: Build Docker images
-- `make docker-run`: Run the application in Docker
-- `make docker-clean`: Clean Docker resources
+- `make install`: Install development dependencies
 - `make lint`: Run linter checks
-- `make fmt`: Format Go code
+- `make check`: Run all checks (lint and tests)
+- `make ngrok`: Configure ngrok with auth token
+- `make tunnel`: Start ngrok tunnel
+- `make app-and-tunnel`: Run application and start ngrok tunnel
 
 ## Slack Integration
 
@@ -116,8 +126,14 @@ go-brain/
    - `groups:history`
    - `im:history`
    - `mpim:history`
-3. Install the app to your workspace
-4. Copy the bot token and signing secret to your `.env` file
+   - `commands` (for slash commands)
+3. Create a new slash command:
+   - Command: `/generate`
+   - Request URL: `https://your-domain.com/slack/events`
+   - Short Description: Generate text using the LLM
+   - Usage Hint: `[prompt]`
+4. Install the app to your workspace
+5. Copy the bot token, signing secret, and bot user ID to your `.env` file
 
 ## Contributing
 
