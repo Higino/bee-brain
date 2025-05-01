@@ -16,9 +16,15 @@ const (
 	defaultModel           = "llama3"
 )
 
+type User struct {
+	SlackName string `json:"slack_name"`
+	SlackID   string `json:"slack_id"`
+}
+
 type Message struct {
 	Role    string `json:"role"`
 	Content string `json:"content"`
+	User    *User  `json:"user,omitempty"`
 }
 
 type Client struct {
@@ -34,11 +40,11 @@ func NewClient(logger *logrus.Logger, name string) *Client {
 }
 
 func (c *Client) Chat(messages []Message) (string, error) {
-	// Log the messages being sent
-	c.logger.Debug("Sending messages to LLM:")
-	for i, msg := range messages {
-		c.logger.Debugf("Message %d [%s]: %s", i+1, msg.Role, msg.Content)
-	}
+	// Add system message for context
+	messages = append(messages, Message{
+		Role:    "system",
+		Content: "Respond in a conversational, human voice, with a neutral tone. Use short sentences and simple words. Avoid academic language, transition phrases, and corporate jargon. Make it sound like someone talking to a friend in simple terms. Keep the key points but strip away any unnecessary words. Use Slack formatting: *bold* for emphasis, _italic_ for subtle emphasis, `code` for code, ```code block``` for multiple lines of code, and • for bullet points. Do not use markdown formatting.",
+	})
 
 	reqBody := map[string]interface{}{
 		"model":    defaultModel,
@@ -67,9 +73,6 @@ func (c *Client) Chat(messages []Message) (string, error) {
 		return "", fmt.Errorf("failed to read response: %w", err)
 	}
 
-	// Log the raw response for debugging
-	c.logger.Debugf("Raw LLM response: %s", string(body))
-
 	// Parse the response
 	var response struct {
 		Model     string `json:"model"`
@@ -81,7 +84,7 @@ func (c *Client) Chat(messages []Message) (string, error) {
 		Done bool `json:"done"`
 	}
 	if err := json.Unmarshal(body, &response); err != nil {
-		c.logger.Errorf("Failed to decode LLM response: %v, body: %s", err, string(body))
+		c.logger.Errorf("Failed to decode LLM response: %v", err)
 		return "", fmt.Errorf("failed to decode response: %w", err)
 	}
 
@@ -90,12 +93,14 @@ func (c *Client) Chat(messages []Message) (string, error) {
 	}
 
 	c.logger.Infof("Received response from LLM (model: %s, length: %d)", response.Model, len(response.Message.Content))
-	c.logger.Debugf("LLM response content: %s", response.Message.Content)
 	return response.Message.Content, nil
 }
 
 func (c *Client) Generate(prompt string) (string, error) {
-	c.logger.Debugf("Generating text for prompt: %s", prompt)
+	// Append instructions to the prompt
+	prompt = fmt.Sprintf("%s\nRespond in a conversational, human voice, with a neutral tone. Use short sentences and simple words. Avoid academic language, transition phrases, and corporate jargon. Make it sound like someone talking to a friend in simple terms. Keep the key points but strip away any unnecessary words. Use Slack formatting: *bold* for emphasis, _italic_ for subtle emphasis, `code` for code, ```code block``` for multiple lines of code, and • for bullet points. Do not use markdown formatting.", prompt)
+
+	c.logger.Debugf("Generating response for prompt: %s", prompt)
 
 	reqBody := map[string]interface{}{
 		"model":  defaultModel,
@@ -124,9 +129,6 @@ func (c *Client) Generate(prompt string) (string, error) {
 		return "", fmt.Errorf("failed to read response: %w", err)
 	}
 
-	// Log the raw response for debugging
-	c.logger.Debugf("Raw LLM generation response: %s", string(body))
-
 	// Parse the response
 	var response struct {
 		Model     string `json:"model"`
@@ -135,7 +137,7 @@ func (c *Client) Generate(prompt string) (string, error) {
 		Done      bool   `json:"done"`
 	}
 	if err := json.Unmarshal(body, &response); err != nil {
-		c.logger.Errorf("Failed to decode LLM generation response: %v, body: %s", err, string(body))
+		c.logger.Errorf("Failed to decode LLM generation response: %v", err)
 		return "", fmt.Errorf("failed to decode response: %w", err)
 	}
 
@@ -144,6 +146,5 @@ func (c *Client) Generate(prompt string) (string, error) {
 	}
 
 	c.logger.Infof("Received generation response from LLM (model: %s, length: %d)", response.Model, len(response.Response))
-	c.logger.Debugf("LLM generation response: %s", response.Response)
 	return response.Response, nil
 }

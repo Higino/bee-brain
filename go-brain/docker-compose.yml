@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   ollama:
     image: ollama/ollama:latest
@@ -7,6 +5,9 @@ services:
       - "11434:11434"
     volumes:
       - ollama_data:/root/.ollama
+    command: ["serve"]
+    networks:
+      - beebrain_net
 
   beebrain:
     build:
@@ -21,6 +22,24 @@ services:
       - SLACK_BOT_USER=${SLACK_BOT_USER}
     depends_on:
       - ollama
+    networks:
+      - beebrain_net
+
+  pull-llama3:
+    image: ollama/ollama:latest
+    volumes:
+      - ollama_data:/root/.ollama
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
+    entrypoint: ["ollama"]
+    command: ["pull", "llama3"]
+    profiles: ["pull-models"]
+    networks:
+      - beebrain_net
 
 volumes:
-  ollama_data: 
+  ollama_data:
+
+networks:
+  beebrain_net:
+    driver: bridge 

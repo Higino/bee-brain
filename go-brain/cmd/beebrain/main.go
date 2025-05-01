@@ -68,13 +68,18 @@ func main() {
 		logger,
 		os.Getenv("SLACK_SIGNING_SECRET"),
 		verificationToken,
+		os.Getenv("LLM_MODE"),
 	)
 
-	// Initialize Echo server
+	// Create Echo instance
 	e := echo.New()
+	// Customize logging middleware to avoid log spamming
+	e.Use(middleware.LoggerWithConfig(middleware.LoggerConfig{
+		Format: `{"time":"${time_rfc3339}","method":"${method}","uri":"${uri}","status":${status},"latency":"${latency_human}"}` + "\n",
+		Output: os.Stdout,
+	}))
 
-	// Add middleware
-	e.Use(middleware.Logger())
+	// Add other middleware
 	e.Use(middleware.Recover())
 	e.Use(middleware.CORS())
 

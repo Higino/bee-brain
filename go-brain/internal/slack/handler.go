@@ -23,17 +23,19 @@ type BeeBrainSlackEventHandler struct {
 	logger            *logrus.Logger
 	signingSecret     string
 	verificationToken string
-	// Add a map to track processed events
-	processedEvents sync.Map
+	// Add a map to track processed events with typed values
+	processedEvents sync.Map // key: string, value: time.Time
+	llmMode         string
 }
 
-func NewBeeBrainSlackEventHandler(client *slack.Client, llmClient *llm.Client, logger *logrus.Logger, signingSecret, verificationToken string) *BeeBrainSlackEventHandler {
+func NewBeeBrainSlackEventHandler(client *slack.Client, llmClient *llm.Client, logger *logrus.Logger, signingSecret, verificationToken, llmMode string) *BeeBrainSlackEventHandler {
 	return &BeeBrainSlackEventHandler{
 		client:            client,
 		llmClient:         llmClient,
 		logger:            logger,
 		signingSecret:     signingSecret,
 		verificationToken: verificationToken,
+		llmMode:           llmMode,
 	}
 }
 
@@ -73,16 +75,16 @@ func (h *BeeBrainSlackEventHandler) HandleSlackEvents(c echo.Context) error {
 		case *slackevents.MessageEvent:
 			// Handle different message subtypes
 			switch ev.SubType {
-			case "message_changed":
-				return h.handleMessageChanged(c, ev)
+			case "": // no subtype, i.e. normal message
+				return h.handleIncomingMessage(c, ev)
 			default:
-				// Only respond to messages that mention the bot
-				if !strings.Contains(ev.Text, "<@") {
-					// Return 200 OK for non-mention messages
-					return c.NoContent(http.StatusOK)
-				}
-				return h.handleMessage(c, ev)
+				return h.handleUnknownEvent(c, ev)
 			}
+		default:
+			if msgEvent, ok := innerEvent.Data.(*slackevents.MessageEvent); ok {
+				return h.handleUnknownEvent(c, msgEvent)
+			}
+			return c.NoContent(http.StatusOK)
 		}
 	}
 
@@ -123,21 +125,9 @@ func (h *BeeBrainSlackEventHandler) getThreadContext(channel, threadTimestamp st
 		return nil, fmt.Errorf("failed to get thread messages: %w", err)
 	}
 
-	// Skip the first message as it's the parent message
-	if len(threadMessages) <= 1 {
-		return nil, nil
-	}
-
 	// Convert thread messages to LLM messages
-	messages := make([]llm.Message, 0, len(threadMessages)-1)
-	for _, msg := range threadMessages[1:] { // Skip the first message
-		// Get user info for better context
-		user, err := h.client.GetUserInfo(msg.User)
-		if err != nil {
-			h.logger.Warnf("Failed to get user info for %s: %v", msg.User, err)
-			user = &slack.User{Name: "Unknown User"}
-		}
-
+	messages := make([]llm.Message, 0, len(threadMessages))
+	for _, msg := range threadMessages {
 		// Determine the role based on whether it's a bot message
 		role := "user"
 		if msg.BotID != "" || msg.SubType == "bot_message" {
@@ -146,7 +136,11 @@ func (h *BeeBrainSlackEventHandler) getThreadContext(channel, threadTimestamp st
 
 		messages = append(messages, llm.Message{
 			Role:    role,
-			Content: fmt.Sprintf("%s: %s", user.Name, msg.Text),
+			Content: msg.Text,
+			User: &llm.User{
+				SlackName: msg.Username,
+				SlackID:   msg.User,
+			},
 		})
 	}
 
@@ -176,13 +170,7 @@ func (h *BeeBrainSlackEventHandler) handleAppMention(c echo.Context, ev *slackev
 		return c.NoContent(http.StatusOK)
 	}
 
-	h.logger.Infof("Received app mention from %s in %s", ev.User, ev.Channel)
-
-	// Get thread context if available
-	threadMessages, err := h.getThreadContext(ev.Channel, ev.ThreadTimeStamp)
-	if err != nil {
-		h.logger.Error("Failed to get thread context:", err)
-	}
+	h.logger.Infof("Processing message from %s on channel %s", ev.User, ev.Channel)
 
 	// Add reaction to show we're processing
 	if err := h.client.AddReaction("eyes", slack.ItemRef{
@@ -192,8 +180,37 @@ func (h *BeeBrainSlackEventHandler) handleAppMention(c echo.Context, ev *slackev
 		h.logger.Error("Failed to add reaction:", err)
 	}
 
+	// Get user info for the person mentioning the bot
+	userInfo, err := h.client.GetUserInfo(ev.User)
+	if err != nil {
+		userInfo = &slack.User{
+			Name: "Unknown UserName",
+			ID:   ev.User,
+		}
+	}
+	h.logger.Debugf("User info retrieved: %s (%s)", userInfo.Name, userInfo.ID)
+
+	// Get thread context if available
+	threadMessages, err := h.getThreadContext(ev.Channel, ev.ThreadTimeStamp)
+	if err != nil {
+		h.logger.Error("Failed to get thread context:", err)
+	}
+
+	messages := make([]llm.Message, 0, len(threadMessages)+2)
+	if len(threadMessages) > 0 {
+		messages = append(messages, threadMessages...)
+		messages = append(messages, llm.Message{
+			Role:    "user",
+			Content: ev.Text,
+			User: &llm.User{
+				SlackName: userInfo.Name,
+				SlackID:   userInfo.ID,
+			},
+		})
+	}
+
 	// Get response from LLM with thread context
-	response, err := h.getLLMResponse(ev.Text, threadMessages)
+	response, err := h.getLLMResponse(messages)
 	if err != nil {
 		h.logger.Error("Failed to get LLM response:", err)
 		response = "Sorry, I encountered an error processing your request."
@@ -211,145 +228,68 @@ func (h *BeeBrainSlackEventHandler) handleAppMention(c echo.Context, ev *slackev
 		Timestamp: ev.TimeStamp,
 	}); err != nil {
 		h.logger.Error("Failed to remove reaction:", err)
+		// Always return a proper response to Slack
+		return c.String(http.StatusOK, "Failed to remove reaction")
 	}
 
 	return c.String(http.StatusOK, "Message processed")
 }
 
-func (h *BeeBrainSlackEventHandler) handleMessage(c echo.Context, ev *slackevents.MessageEvent) error {
-	// Skip if this is a duplicate event
-	if h.isDuplicateEvent(ev.EventTimeStamp) {
-		return c.NoContent(http.StatusOK)
-	}
-
-	// Skip if this is a bot message or if the bot is not mentioned
-	if ev.BotID != "" || ev.SubType == "bot_message" || !strings.Contains(ev.Text, "<@") {
-		h.logger.Debugf("Skipping bot message or non-mention message: %s", ev.Text)
-		return c.NoContent(http.StatusOK)
-	}
-
-	h.logger.Infof("Received message from %s in %s", ev.User, ev.Channel)
-
-	// Add reaction to show we're processing
-	if err := h.client.AddReaction("eyes", slack.ItemRef{
-		Channel:   ev.Channel,
-		Timestamp: ev.TimeStamp,
-	}); err != nil {
-		h.logger.Error("Failed to add reaction:", err)
-	}
-
-	// Get thread context if available
-	threadMessages, err := h.getThreadContext(ev.Channel, ev.ThreadTimeStamp)
+func (h *BeeBrainSlackEventHandler) handleIncomingMessage(c echo.Context, ev *slackevents.MessageEvent) error {
+	// Get user info from Slack API
+	userInfo, err := h.client.GetUserInfo(ev.User)
 	if err != nil {
-		h.logger.Error("Failed to get thread context:", err)
+		h.logger.Warnf("Failed to get user info for %s: %v", ev.User, err)
+		userInfo = &slack.User{
+			Name: "Unknown User",
+			ID:   ev.User,
+		}
 	}
 
-	// Get response from LLM with thread context
-	response, err := h.getLLMResponse(ev.Text, threadMessages)
-	if err != nil {
-		h.logger.Error("Failed to get LLM response:", err)
-		response = "Sorry, I encountered an error processing your request."
-	}
-
-	// Post response to Slack
-	if err := h.postResponse(ev.Channel, response, ev.ThreadTimeStamp); err != nil {
-		h.logger.Error("Failed to post message:", err)
-		return c.String(http.StatusOK, "Error processing request")
-	}
-
-	// Remove reaction
-	if err := h.client.RemoveReaction("eyes", slack.ItemRef{
-		Channel:   ev.Channel,
-		Timestamp: ev.TimeStamp,
-	}); err != nil {
-		h.logger.Error("Failed to remove reaction:", err)
-	}
-
-	return c.String(http.StatusOK, "Message processed")
-}
-
-func (h *BeeBrainSlackEventHandler) handleMessageChanged(c echo.Context, ev *slackevents.MessageEvent) error {
-	// Skip if this is a duplicate event
-	if h.isDuplicateEvent(ev.EventTimeStamp) {
-		return c.NoContent(http.StatusOK)
-	}
-
-	// Skip if this is a bot message or if the bot is not mentioned
-	if ev.BotID != "" || ev.SubType == "bot_message" || !strings.Contains(ev.Text, "<@") {
-		h.logger.Debugf("Skipping bot message or non-mention message: %s", ev.Text)
-		return c.NoContent(http.StatusOK)
-	}
-
-	h.logger.Infof("Received message edit from %s in %s", ev.User, ev.Channel)
-
-	// Add reaction to show we're processing
-	if err := h.client.AddReaction("eyes", slack.ItemRef{
-		Channel:   ev.Channel,
-		Timestamp: ev.TimeStamp,
-	}); err != nil {
-		h.logger.Error("Failed to add reaction:", err)
-	}
-
-	// Get thread context if available
-	threadMessages, err := h.getThreadContext(ev.Channel, ev.ThreadTimeStamp)
-	if err != nil {
-		h.logger.Error("Failed to get thread context:", err)
-	}
-
-	// Get response from LLM with thread context
-	response, err := h.getLLMResponse(ev.Text, threadMessages)
-	if err != nil {
-		h.logger.Error("Failed to get LLM response:", err)
-		response = "Sorry, I encountered an error processing your request."
-	}
-
-	// Post response to Slack
-	if err := h.postResponse(ev.Channel, response, ev.ThreadTimeStamp); err != nil {
-		h.logger.Error("Failed to post message:", err)
-		return c.String(http.StatusOK, "Error processing request")
-	}
-
-	// Remove reaction
-	if err := h.client.RemoveReaction("eyes", slack.ItemRef{
-		Channel:   ev.Channel,
-		Timestamp: ev.TimeStamp,
-	}); err != nil {
-		h.logger.Error("Failed to remove reaction:", err)
-	}
+	h.logger.Infof("IncommingMessage - User: %s (%s), Channel: %s, Thread: %s, Text: %s",
+		userInfo.Name, userInfo.ID, ev.Channel, ev.ThreadTimeStamp, ev.Text)
 
 	return c.NoContent(http.StatusOK)
 }
 
-func (h *BeeBrainSlackEventHandler) getLLMResponse(text string, threadMessages []llm.Message) (string, error) {
-	messages := make([]llm.Message, 0, len(threadMessages)+2)
-
-	// Add system message for context
-	messages = append(messages, llm.Message{
-		Role:    "system",
-		Content: fmt.Sprintf("You are %s, a helpful AI assistant. Answer questions concisely and prevent repeating yourself.", h.llmClient.Name),
-	})
-
-	// Add thread messages if available
-	if len(threadMessages) > 0 {
-		messages = append(messages, threadMessages...)
+func (h *BeeBrainSlackEventHandler) handleUnknownEvent(c echo.Context, ev *slackevents.MessageEvent) error {
+	userID := ev.User
+	if userID == "" && ev.Message != nil {
+		userID = ev.Message.User
+	} else {
+		userID = "Unknown User"
 	}
 
-	// Add the current message
-	messages = append(messages, llm.Message{
-		Role:    "user",
-		Content: text,
-	})
+	h.logger.Infof("Unimplemented event: %s(%s) - User: %s, Channel: %s, Thread: %s, Text: %s",
+		ev.Type, ev.SubType, userID, ev.Channel, ev.ThreadTimeStamp, ev.Text)
 
-	return h.llmClient.Chat(messages)
+	return c.NoContent(http.StatusOK)
+}
+
+func (h *BeeBrainSlackEventHandler) getLLMResponse(messages []llm.Message) (string, error) {
+	// Choose between Chat and Generate based on LLM_MODE
+	if h.llmMode == "chat" {
+		return h.llmClient.Chat(messages)
+	} else {
+		// Default to Generate mode
+		// Concatenate all messages into a single string
+		var fullContext strings.Builder
+		for _, msg := range messages {
+			fullContext.WriteString(fmt.Sprintf("%s|%s: %s\n", msg.User.SlackID, msg.User.SlackName, msg.Content))
+		}
+		resp, err := h.llmClient.Generate(fullContext.String())
+		// Response comes markdown change to have it formated for slack
+
+		return resp, err
+	}
 }
 
 func (h *BeeBrainSlackEventHandler) postResponse(channel, response, threadTimestamp string) error {
-	// Log the thread context for debugging
-	h.logger.Debugf("Posting response to channel %s, thread: %s", channel, threadTimestamp)
-
-	// Create message options
+	// Create message options with formatting enabled
 	opts := []slack.MsgOption{
-		slack.MsgOptionText(response, false),
+		slack.MsgOptionText(response, false), // false means don't escape special characters
+		slack.MsgOptionEnableLinkUnfurl(),    // Enable link unfurling
+		slack.MsgOptionAsUser(true),          // Post as the bot user
 	}
 
 	// Add thread timestamp if available
@@ -370,12 +310,18 @@ func (h *BeeBrainSlackEventHandler) postResponse(channel, response, threadTimest
 // cleanupOldEvents removes events older than 1 hour from the processed events map
 func (h *BeeBrainSlackEventHandler) cleanupOldEvents() {
 	now := time.Now()
-	h.processedEvents.Range(func(key, value interface{}) bool {
-		if timestamp, ok := value.(time.Time); ok {
-			if now.Sub(timestamp) > time.Hour {
-				h.processedEvents.Delete(key)
-			}
+
+	// Type-safe wrapper for the Range callback
+	processEvent := func(key, value interface{}) bool {
+		// We know the types, so we can safely assert them
+		eventKey := key.(string)
+		timestamp := value.(time.Time)
+
+		if now.Sub(timestamp) > time.Hour {
+			h.processedEvents.Delete(eventKey)
 		}
 		return true
-	})
+	}
+
+	h.processedEvents.Range(processEvent)
 }

@@ -58,6 +58,9 @@ verify-env:
 	done
 	@echo "$(GREEN)Environment variables check passed!$(RESET)"
 
+verify: verify-go verify-env
+	@echo "$(GREEN)All checks passed!$(RESET)"
+
 # Download dependencies
 deps: verify-go
 	@echo "$(BLUE)Downloading dependencies...$(RESET)"
@@ -146,9 +149,19 @@ app-and-tunnel: build configure-ngrok
 
 docker-run:
 	@echo "$(BLUE)Starting Docker services...$(RESET)"
-	@docker-compose up --build
+	@docker-compose up -d --build
 
 docker-clean:
 	@echo "$(YELLOW)Cleaning Docker resources...$(RESET)"
-	@docker-compose down -v
-	@echo "$(GREEN)Docker cleanup complete!$(RESET)" 
+	@docker-compose down --remove-orphans
+	@docker-compose down -v --remove-orphans
+	@echo "$(BLUE)Force removing any remaining containers...$(RESET)"
+	@docker ps -a --filter name=go-brain --format "{{.ID}}" | xargs -r docker rm -f
+	@echo "$(GREEN)Docker cleanup complete!$(RESET)"
+
+docker-pull-llama3:
+	@echo "$(BLUE)Pulling llama3 model...$(RESET)"
+	@docker-compose --profile pull-models up pull-llama3
+	@echo "$(BLUE)Removing pull containers...$(RESET)"
+	@docker ps -a --filter name=pull --format "{{.Names}}" | xargs -r docker rm -f
+	@echo "$(GREEN)Model pull complete!$(RESET)"
