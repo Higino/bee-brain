@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/sirupsen/logrus"
 )
@@ -148,6 +149,24 @@ func (c *Client) Generate(prompt string) (string, error) {
 
 	c.logger.Infof("Received generation response from LLM (model: %s, length: %d)", response.Model, len(response.Response))
 	return response.Response, nil
+}
+
+// Summarize takes a list of messages and generates a summary
+func (c *Client) Summarize(messages []Message) (string, error) {
+	// Create a prompt for summarization
+	var prompt strings.Builder
+	prompt.WriteString("Please provide a concise summary of the following conversation thread. Focus on the key points and main ideas. Keep it brief but informative. Use bullet points for clarity:\n\n")
+
+	// Add all messages to the prompt
+	for _, msg := range messages {
+		prompt.WriteString(fmt.Sprintf("%s: %s\n", msg.User.SlackName, msg.Content))
+	}
+
+	// Add final instruction
+	prompt.WriteString("\nSummary:")
+
+	// Use the Generate function with the summarization prompt
+	return c.Generate(prompt.String())
 }
 
 func (c *Client) GetEmbedding(text string) ([]float32, error) {

@@ -64,6 +64,9 @@ func (h *BeeBrainSlackEventHandler) HandleSlackEvents(c echo.Context) error {
 		return c.String(http.StatusOK, "Invalid request")
 	}
 
+	// Log the parsed event type
+	h.logger.Debugf("Parsed event type: %s", slackEvent.Type)
+
 	// Handle URL verification
 	if slackEvent.Type == slackevents.URLVerification {
 		return h.handleURLVerification(c, body)
@@ -72,6 +75,8 @@ func (h *BeeBrainSlackEventHandler) HandleSlackEvents(c echo.Context) error {
 	// Handle callback events
 	if slackEvent.Type == slackevents.CallbackEvent {
 		innerEvent := slackEvent.InnerEvent
+		h.logger.Debugf("Inner event type: %T", innerEvent.Data)
+
 		switch ev := innerEvent.Data.(type) {
 		case *slackevents.AppMentionEvent:
 			return h.handleAppMention(c, ev)
@@ -83,7 +88,11 @@ func (h *BeeBrainSlackEventHandler) HandleSlackEvents(c echo.Context) error {
 			default:
 				return h.handleUnknownEvent(c, ev)
 			}
+		case *slackevents.ReactionAddedEvent:
+			h.logger.Debugf("Processing reaction event: %+v", ev)
+			return h.handleReactionAdded(c, ev)
 		default:
+			h.logger.Debugf("Unhandled event type: %T", ev)
 			if msgEvent, ok := innerEvent.Data.(*slackevents.MessageEvent); ok {
 				return h.handleUnknownEvent(c, msgEvent)
 			}
@@ -173,7 +182,7 @@ func (h *BeeBrainSlackEventHandler) handleAppMention(c echo.Context, ev *slackev
 		return c.NoContent(http.StatusOK)
 	}
 
-	h.logger.Infof("Processing message from %s on channel %s", ev.User, ev.Channel)
+	h.logger.Infof("APP MENTION: Processing message from %s on channel %s", ev.User, ev.Channel)
 
 	// Add reaction to show we're processing
 	if err := h.client.AddReaction("eyes", slack.ItemRef{
@@ -239,11 +248,6 @@ func (h *BeeBrainSlackEventHandler) handleAppMention(c echo.Context, ev *slackev
 }
 
 func (h *BeeBrainSlackEventHandler) handleIncomingMessage(c echo.Context, ev *slackevents.MessageEvent) error {
-	// Skip if this is a duplicate event
-	if h.isDuplicateEvent(ev.EventTimeStamp) {
-		return c.NoContent(http.StatusOK)
-	}
-
 	// Get user info from Slack API
 	userInfo, err := h.client.GetUserInfo(ev.User)
 	if err != nil {
@@ -257,27 +261,27 @@ func (h *BeeBrainSlackEventHandler) handleIncomingMessage(c echo.Context, ev *sl
 	h.logger.Infof("IncommingMessage - User: %s (%s), Channel: %s, Thread: %s, Text: %s",
 		userInfo.Name, userInfo.ID, ev.Channel, ev.ThreadTimeStamp, ev.Text)
 
-	// Get embedding for the message
-	embedding, err := h.llmClient.GetEmbedding(ev.Text)
-	if err != nil {
-		h.logger.Errorf("Failed to get embedding for message: %v", err)
-		return c.NoContent(http.StatusOK)
-	}
+	// // Get embedding for the message
+	// embedding, err := h.llmClient.GetEmbedding(ev.Text)
+	// if err != nil {
+	// 	h.logger.Errorf("Failed to get embedding for message: %v", err)
+	// 	return c.NoContent(http.StatusOK)
+	// }
 
-	// Store message in VectorDB with a proper UUID
-	msg := vectordb.Message{
-		ID:        "", // Let VectorDB client generate a proper UUID
-		Text:      ev.Text,
-		UserID:    ev.User,
-		ChannelID: ev.Channel,
-		Timestamp: ev.TimeStamp,
-		ThreadID:  ev.ThreadTimeStamp, // The thread's root message timestamp (unique identifier for the thread)
-		Embedding: embedding,
-	}
+	// // Store message in VectorDB with a proper UUID
+	// msg := vectordb.Message{
+	// 	ID:        "", // Let VectorDB client generate a proper UUID
+	// 	Text:      ev.Text,
+	// 	UserID:    ev.User,
+	// 	ChannelID: ev.Channel,
+	// 	Timestamp: ev.TimeStamp,
+	// 	ThreadID:  ev.ThreadTimeStamp, // The thread's root message timestamp (unique identifier for the thread)
+	// 	Embedding: embedding,
+	// }
 
-	if err := h.vectorDB.StoreMessage(msg); err != nil {
-		h.logger.Errorf("Failed to store message in VectorDB: %v", err)
-	}
+	// if err := h.vectorDB.StoreMessage(msg); err != nil {
+	// 	h.logger.Errorf("Failed to store message in VectorDB: %v", err)
+	// }
 
 	return c.NoContent(http.StatusOK)
 }
@@ -354,4 +358,91 @@ func (h *BeeBrainSlackEventHandler) cleanupOldEvents() {
 	}
 
 	h.processedEvents.Range(processEvent)
+}
+
+// handleReactionAdded handles when a reaction is added to a message
+func (h *BeeBrainSlackEventHandler) handleReactionAdded(c echo.Context, ev *slackevents.ReactionAddedEvent) error {
+	// Skip if this is a duplicate event
+	if h.isDuplicateEvent(ev.EventTimestamp) {
+		return c.NoContent(http.StatusOK)
+	}
+
+	// Get user info for the person who added the reaction
+	userInfo, err := h.client.GetUserInfo(ev.User)
+	if err != nil {
+		userInfo = &slack.User{
+			Name: "Unknown User",
+			ID:   ev.User,
+		}
+	}
+
+	// Get the message that was reacted to
+	message, err := h.client.GetConversationHistory(&slack.GetConversationHistoryParameters{
+		ChannelID: ev.Item.Channel,
+		Latest:    ev.Item.Timestamp,
+		Limit:     1,
+		Inclusive: true,
+	})
+	if err != nil {
+		h.logger.Errorf("Failed to get message info: %v", err)
+		return c.NoContent(http.StatusOK)
+	}
+
+	// Log the reaction event
+	h.logger.Infof("Reaction added by %s (%s): %s to message: %s",
+		userInfo.Name,
+		userInfo.ID,
+		ev.Reaction,
+		message.Messages[0].Text)
+
+	// Check if the reaction is eyes
+	if ev.Reaction == "robot_face" {
+		h.logger.Infof("Detected 'robot_face' reaction from %s", userInfo.Name)
+
+		// Get thread context if available
+		threadMessages, err := h.getThreadContext(ev.Item.Channel, message.Messages[0].ThreadTimestamp)
+		if err != nil {
+			h.logger.Error("Failed to get thread context:", err)
+		}
+
+		// Prepare messages for summarization
+		messages := make([]llm.Message, 0, len(threadMessages)+1)
+		if len(threadMessages) > 0 {
+			messages = append(messages, threadMessages...)
+		}
+
+		// Add the current message
+		messages = append(messages, llm.Message{
+			Role:    "user",
+			Content: message.Messages[0].Text,
+			User: &llm.User{
+				SlackName: userInfo.Name,
+				SlackID:   userInfo.ID,
+			},
+		})
+
+		// Get summary from LLM
+		summary, err := h.llmClient.Summarize(messages)
+		if err != nil {
+			h.logger.Error("Failed to get summary:", err)
+			summary = "Sorry, I encountered an error generating the summary."
+		}
+
+		// Format the response
+		response := fmt.Sprintf("*Summary of the conversation:*\n\n%s", summary)
+
+		// Determine the correct thread timestamp
+		threadTimestamp := message.Messages[0].ThreadTimestamp
+		if threadTimestamp == "" {
+			// If no thread exists, use the message's timestamp as the thread starter
+			threadTimestamp = message.Messages[0].Timestamp
+		}
+
+		// Post response to Slack in the correct thread
+		if err := h.postResponse(ev.Item.Channel, response, threadTimestamp); err != nil {
+			h.logger.Error("Failed to post message:", err)
+		}
+	}
+
+	return c.NoContent(http.StatusOK)
 }
