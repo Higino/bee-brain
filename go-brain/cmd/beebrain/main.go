@@ -25,7 +25,7 @@ func main() {
 	// Initialize logger
 	logger := logrus.New()
 	logger.SetFormatter(&logrus.TextFormatter{
-		FullTimestamp: true,
+		FullTimestamp: false,
 	})
 
 	// Set log level from environment variable
@@ -76,7 +76,7 @@ func main() {
 	logger.Info("Successfully initialized VectorDB")
 
 	// Create Slack event handler
-	slackHandler := slackhandler.NewBeeBrainSlackEventHandler(
+	slackHandler := slackhandler.NewBeeBrainSlackHandler(
 		slackClient,
 		llmClient,
 		vectorDB,
