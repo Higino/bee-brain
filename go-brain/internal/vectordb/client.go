@@ -18,6 +18,12 @@ const (
 	vectorSize     = 4096 // Size of embeddings from Ollama
 )
 
+// VectorDBClient interface defines the methods for vector database operations
+type VectorDBClient interface {
+	StoreMessage(msg Message) error
+	SearchSimilar(ctx context.Context, embedding []float32, limit uint64) ([]Message, error)
+}
+
 type Client struct {
 	collectionsClient go_client.CollectionsClient
 	pointsClient      go_client.PointsClient

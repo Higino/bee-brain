@@ -18,6 +18,13 @@ const (
 	defaultModel            = "llama3"
 )
 
+// LLMClient interface defines the methods for LLM operations
+type LLMClient interface {
+	Chat(messages []Message) (string, error)
+	Generate(prompt string) (string, error)
+	GetEmbedding(text string) ([]float32, error)
+}
+
 type User struct {
 	SlackName string `json:"slack_name"`
 	SlackID   string `json:"slack_id"`

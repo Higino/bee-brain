@@ -13,6 +13,13 @@ import (
 	"github.com/slack-go/slack"
 )
 
+// SlackClient interface defines the methods we need from slack.Client
+type SlackClient interface {
+	GetConversationHistory(params *slack.GetConversationHistoryParameters) (*slack.GetConversationHistoryResponse, error)
+	GetConversationReplies(params *slack.GetConversationRepliesParameters) ([]slack.Message, bool, string, error)
+	PostMessage(channelID string, options ...slack.MsgOption) (string, string, error)
+}
+
 // TruncatingFormatter is a custom formatter that truncates long messages
 type TruncatingFormatter struct {
 	Formatter logrus.Formatter
@@ -29,16 +36,15 @@ func (f *TruncatingFormatter) Format(entry *logrus.Entry) ([]byte, error) {
 }
 
 type ConversationManager struct {
-	client         *slack.Client
-	llmClient      *llm.Client
+	client         SlackClient
+	llmClient      llm.LLMClient
 	logger         *logrus.Logger
 	messageHistory *sync.Map
 	llmMode        string
-	vectorDB       *vectordb.Client
+	vectorDB       vectordb.VectorDBClient
 }
 
-func NewConversationManager(client *slack.Client, llmClient *llm.Client, logger *logrus.Logger, llmMode string, vectorDB *vectordb.Client) *ConversationManager {
-
+func NewConversationManager(client SlackClient, llmClient llm.LLMClient, logger *logrus.Logger, llmMode string, vectorDB vectordb.VectorDBClient) *ConversationManager {
 	if vectorDB == nil {
 		logger.Error("vectorDB client is not initialized")
 		return nil
